@@ -75,7 +75,7 @@
       @endif
 
       <div class="page-header">
-        <h1 class="page-title">My Learning Portal</h1>
+        <h1 class="page-title">My Training Portal</h1>
         <p class="page-subtitle">Track your required upskilling programs and compliance training.</p>
       </div>
 

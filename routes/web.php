@@ -162,7 +162,7 @@ Route::prefix('admin')->middleware(['auth', 'role:admin,administrator,hr,manager
     Route::get('/appraisal', [KpiController::class, 'index'])->name('admin.appraisal');
     Route::get('/appraisal/initiate', [KpiController::class, 'create'])->name('admin.appraisal.add-kpi');
     Route::post('/appraisal/store', [KpiController::class, 'store'])->name('admin.appraisal.store');
-
+    Route::get('/appraisals/{id}', [\App\Http\Controllers\KpiController::class, 'show'])->name('admin.appraisals.show');
     // Training
     Route::get('/training', [TrainingController::class, 'index'])->name('admin.training');
     Route::post('/training/store', [TrainingController::class, 'store'])->name('admin.training.store');
