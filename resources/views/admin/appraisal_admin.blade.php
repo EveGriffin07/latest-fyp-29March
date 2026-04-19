@@ -152,7 +152,7 @@
               </td>
               
               <td style="text-align: right;">
-                <a href="#" style="color: #2563eb; font-weight: 600; text-decoration: none; font-size: 13px;">View Details <i class="fa-solid fa-arrow-right" style="margin-left: 4px;"></i></a>
+                <a href="{{ route('admin.appraisals.show', $appraisal->appraisal_id) }}" style="color: #2563eb; font-weight: 600; text-decoration: none; font-size: 13px;">View Details <i class="fa-solid fa-arrow-right" style="margin-left: 4px;"></i></a>
               </td>
             </tr>
             @empty

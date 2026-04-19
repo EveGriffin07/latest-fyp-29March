@@ -32,6 +32,33 @@ class AssistantController extends Controller
         $system = <<<SYS
 You are an HRMS Assistant for ADMIN users. Today's Date is: {$today}.
 
+=============================================================
+STRICT SCOPE RULE — READ THIS FIRST, APPLIES TO EVERY MESSAGE
+=============================================================
+You ONLY answer questions related to the HRMS system, which includes:
+- Employees, attendance, leave, payroll, salary
+- Recruitment (job posts, applicants, applications)
+- Performance, KPIs, appraisals
+- Training programs and enrollments
+- Onboarding
+- Company policies, FAQs, announcements
+- General HR concepts, definitions, and professional work advice (e.g., "What is a KPI?", "How do I write a termination letter?", "Best practices for performance reviews")
+
+If the user asks ANYTHING outside this scope — including but not limited to:
+- Pop culture (anime, movies, TV shows, celebrities, fictional characters like Gojo Satoru, Naruto, Harry Potter, etc.)
+- Coding help, math problems, homework, general trivia
+- Politics, religion, news, sports, weather
+- Cooking, travel, dating, personal life advice
+- Any other off-topic subject
+
+You MUST respond EXACTLY with this message (no JSON, no elaboration):
+"I'm an HRMS Assistant, so I can only help with HR-related topics like employees, leave, payroll, recruitment, training, onboarding, and performance. Please ask me about those instead."
+
+Do NOT answer the off-topic question even partially. Do NOT explain who the character is and then add the disclaimer. Just refuse.
+
+=============================================================
+INTERNAL (DATABASE) QUERIES — USE TOOLS
+=============================================================
 If you need info from the database, respond ONLY with RAW valid JSON (no markdown, no conversational text before or after), exactly like:
 
 1) FAQ / policy:
@@ -83,7 +110,7 @@ IMPORTANT ROUTING SCENARIOS & RULES:
 
 [SCENARIO MAP: HOW TO CHOOSE A TOOL]
 1. GENERAL CAPABILITIES:
-   - If Admin asks: "What can you do?" -> Output a natural language list of your modules. No JSON.
+   - If Admin asks: "What can you do?" -> Output a natural language list of your HRMS modules. No JSON.
 
 2. RECRUITMENT:
    - If Admin asks: "What jobs are open?" -> `search_job_posts`
@@ -128,6 +155,16 @@ SYS;
         }
 
         $messages[] = ["role" => "user", "content" => $userInput];
+
+        // ==========================================
+        // PRE-AI SCOPE GUARD (Hard-coded safety net)
+        // ==========================================
+        // If the message clearly mentions off-topic keywords, block before even calling the AI.
+        if ($this->isOffTopicQuery($userInput)) {
+            return response()->json([
+                'reply' => "I'm an HRMS Assistant, so I can only help with HR-related topics like employees, leave, payroll, recruitment, training, onboarding, and performance. Please ask me about those instead."
+            ]);
+        }
 
         $first = $this->ollamaChat($messages);
         $reply = $first['message']['content'] ?? '';
@@ -458,6 +495,40 @@ SYS;
         return response()->json(['reply' => $this->normalizeFinalReply($reply)]);
     }
 
+    // ==========================================
+    // OFF-TOPIC DETECTOR (Pre-AI Safety Net)
+    // ==========================================
+    private function isOffTopicQuery(string $text): bool
+    {
+        $t = strtolower($text);
+
+        // Clearly off-topic keywords — anime, pop culture, entertainment, unrelated topics
+        $offTopicPatterns = [
+            // Anime / manga / fictional characters
+            '/\b(gojo|satoru|naruto|goku|luffy|itachi|sasuke|anime|manga|otaku|waifu|jujutsu kaisen|one piece|dragon ball|attack on titan|demon slayer)\b/i',
+            // Movies / TV / celebrities
+            '/\b(harry potter|marvel|disney|netflix|movie|film|celebrity|actor|actress|tiktok|instagram)\b/i',
+            // Games
+            '/\b(minecraft|fortnite|valorant|genshin|pokemon|mobile legends|dota|league of legends|video game)\b/i',
+            // Sports / weather / news
+            '/\b(football|soccer|basketball|f1|formula 1|weather today|news today|election|politics|president|prime minister)\b/i',
+            // Random trivia / cooking / travel
+            '/\b(recipe|cooking|how to cook|travel to|flight to|booking hotel|restaurant recommendation)\b/i',
+            // Math / homework / programming unrelated
+            '/\b(solve this equation|integrate|differentiate|write python|write javascript|my homework)\b/i',
+            // Personal life
+            '/\b(girlfriend|boyfriend|dating|relationship advice|love advice)\b/i',
+        ];
+
+        foreach ($offTopicPatterns as $pattern) {
+            if (preg_match($pattern, $t)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function isRecruitmentQuery(string $text): bool
     {
         $t = strtolower($text);
@@ -474,16 +545,31 @@ SYS;
     private function ollamaChat(array $messages): array
     {
         try {
-            $res = Http::timeout(180)->post('http://localhost:11434/api/chat', [
-                'model' => 'qwen2.5:7b', // Set back to your working tag
-                'stream' => false,
-                'messages' => $messages,
-            ]);
+            $res = Http::timeout(180)
+                ->withHeaders([
+                    'Authorization' => 'Bearer ' . env('OPENAI_API_KEY'),
+                    'Content-Type' => 'application/json',
+                ])
+                ->post('https://api.openai.com/v1/chat/completions', [
+                    'model' => 'gpt-4o-mini',
+                    'messages' => $messages,
+                    'temperature' => 0.3,
+                    'stream' => false,
+                ]);
 
-            if (!$res->ok()) return ['message' => ['content' => 'Ollama API error: HTTP ' . $res->status()]];
-            return $res->json();
+            if (!$res->ok()) {
+                $errorBody = $res->json();
+                $errorMsg = $errorBody['error']['message'] ?? 'Unknown error';
+                return ['message' => ['content' => 'OpenAI API error: ' . $errorMsg]];
+            }
+
+            $data = $res->json();
+
+            $content = $data['choices'][0]['message']['content'] ?? 'No response.';
+            return ['message' => ['content' => $content]];
+
         } catch (\Exception $e) {
-            return ['message' => ['content' => "⚠️ **Local AI Connection Error:** The AI assistant ran out of memory or timed out. \n\n*Technical Details: " . $e->getMessage() . "*"]];
+            return ['message' => ['content' => 'AI Connection Error: ' . $e->getMessage()]];
         }
     }
 

@@ -753,6 +753,67 @@
     }
 
     // ==========================================================
+// 8. EXPERIENCE DATE VALIDATION (Start <= Today, End >= Start)
+// ==========================================================
+const experienceForm = document.querySelector('#experienceModal form');
+if (experienceForm) {
+    const expStartInput = experienceForm.querySelector('input[name="start_date"]');
+    const expEndInput = experienceForm.querySelector('input[name="end_date"]');
+
+    // Set max date to today for Start Date (prevents picking future dates in the calendar)
+    const today = new Date().toISOString().split('T')[0];
+    expStartInput.setAttribute('max', today);
+    expEndInput.setAttribute('max', today);
+
+    // Dynamically update End Date's minimum when Start Date changes
+    expStartInput.addEventListener('change', function() {
+        if (this.value) {
+            expEndInput.setAttribute('min', this.value);
+        }
+    });
+
+    // Final validation on submit
+    experienceForm.addEventListener('submit', function(e) {
+        const startDateStr = expStartInput.value;
+        const endDateStr = expEndInput.value;
+        const isCurrent = document.getElementById('expCurrentCheck').checked;
+
+        const todayDate = new Date();
+        todayDate.setHours(23, 59, 59, 999); // Allow today's date
+
+        // Check 1: Start Date cannot be in the future
+        if (startDateStr) {
+            const start = new Date(startDateStr);
+            if (start > todayDate) {
+                e.preventDefault();
+                alert('Validation Error: Your Start Date cannot be in the future.');
+                return;
+            }
+        }
+
+        // Check 2: End Date validation (only if "currently work here" is NOT checked)
+        if (!isCurrent && endDateStr) {
+            const start = new Date(startDateStr);
+            const end = new Date(endDateStr);
+
+            // End Date cannot be before Start Date
+            if (end < start) {
+                e.preventDefault();
+                alert('Validation Error: Your End Date cannot be earlier than your Start Date.');
+                return;
+            }
+
+            // End Date cannot be in the future
+            if (end > todayDate) {
+                e.preventDefault();
+                alert('Validation Error: Your End Date cannot be in the future.');
+                return;
+            }
+        }
+    });
+}
+
+    // ==========================================================
     // 7. TOGGLE "VIEW ALL" SECTIONS (Show More / Show Less)
     // ==========================================================
     // ==========================================================

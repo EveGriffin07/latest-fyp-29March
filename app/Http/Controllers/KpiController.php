@@ -44,6 +44,20 @@ class KpiController extends Controller
     }
 
     // =========================================================
+// 8. ADMIN: View Full Appraisal Details
+// =========================================================
+public function show($id)
+{
+    $appraisal = Appraisal::with([
+        'employee.user',
+        'employee.position',
+        'evaluator.user'
+    ])->findOrFail($id);
+
+    return view('admin.appraisals_show', compact('appraisal'));
+}
+
+    // =========================================================
     // 3. ADMIN: STORE RECORD (Save to Database)
     // =========================================================
     public function store(Request $request)

@@ -60,8 +60,12 @@ class EmployeeAssistantController extends Controller
 
 12) Team Onboarding Status:
 {"action":"tool","tool":"team_onboarding_status","args":{"employee_name":"optional name"}}
+
+13) List My Team Members (who reports to me):
+{"action":"tool","tool":"team_members"}
 SUP;
-            $securityRules = "- PRIVACY SHIELD (SUPERVISOR): You can query your OWN personal data using the 'My' tools. You can ALSO query data for your TEAM MEMBERS (people in your specific department) using the 'Team' tools. If asked about an employee in another department, politely decline and state you only have access to your own department.";
+            $securityRules = "- PRIVACY SHIELD (SUPERVISOR): You can query your OWN personal data using the 'My' tools. You can ALSO query data for your TEAM MEMBERS (people in your specific department) using the 'Team' tools. If asked about an employee in another department, politely decline and state you only have access to your own department.
+- WHO IS ON MY TEAM: If the supervisor asks 'who is under my supervision', 'who is on my team', 'list my staff', 'who reports to me', or similar — use the 'team_members' tool (#13) to list them.";
         } else {
             $securityRules = "- PRIVACY SHIELD (EMPLOYEE): You are a SELF-SERVICE assistant. If the user asks about another employee's private data (leave, KPIs, salary, etc.), DO NOT use a tool. Politely decline and state you only have access to their personal data.";
         }
@@ -109,6 +113,7 @@ IMPORTANT SECURITY & ROUTING RULES:
 {$securityRules}
 - EXTERNAL ADVICE: If the user asks "How do I improve my time management?", "What is a KPI?", or "Help me draft a sick leave email", DO NOT output JSON. Output a professional, direct answer in Markdown.
 - INTERNAL DATA: If the user asks about their own data, announcements, available trainings, or their team, output ONLY the RAW JSON tool call.
+- NEVER invent tool names. Only use the tools listed above (numbered 1-9, plus 10-13 if you are serving a supervisor). If no tool fits the request, answer directly from knowledge.
 
 Final answer rules:
 - After receiving a TOOL_RESULT, return ONLY plain text or markdown formatting. No JSON.
@@ -409,26 +414,123 @@ SYS;
             return response()->json(['reply' => $this->normalizeFinalReply($second['message']['content'] ?? '')]);
         }
 
+        // ==========================================
+        // TEAM MEMBERS (Who's in my department)
+        // ==========================================
+        if (is_array($toolCall) && ($toolCall['tool'] ?? '') === 'team_members') {
+            if ($role !== 'supervisor') {
+                return response()->json(['reply' => 'Access Denied. Only supervisors can view their team.']);
+            }
+
+            if (!$myDepartmentId) {
+                return response()->json(['reply' => 'You are not assigned to any department, so I cannot list your team members.']);
+            }
+
+            // Build query — use leftJoin for positions/departments in case those tables don't exist or the employee lacks them
+            $query = DB::table('employees as e')
+                ->join('users as u', "u.{$usersPk}", '=', 'e.user_id')
+                ->where('e.department_id', $myDepartmentId)
+                ->where('u.role', 'employee') // Only regular staff, exclude other supervisors/admins
+                ->where('e.employee_id', '!=', $myEmployeeId); // Exclude the supervisor themselves
+
+            // Only select position/department if those tables exist in the schema
+            if (Schema::hasTable('positions')) {
+                $query->leftJoin('positions as p', 'e.position_id', '=', 'p.position_id');
+            }
+            if (Schema::hasTable('departments')) {
+                $query->leftJoin('departments as d', 'e.department_id', '=', 'd.department_id');
+            }
+
+            $selectFields = ['u.name', 'u.email', 'e.employee_id'];
+            if (Schema::hasTable('positions')) $selectFields[] = 'p.position_name';
+            if (Schema::hasTable('departments')) $selectFields[] = 'd.department_name';
+
+            $team = $query->select($selectFields)->orderBy('u.name', 'asc')->get();
+
+            if ($team->count() === 0) {
+                $payload = ["message" => "You currently have no team members under your supervision in your department."];
+            } else {
+                $payload = [
+                    "total_members" => $team->count(),
+                    "department" => $team->first()->department_name ?? 'Your Department',
+                    "members" => $team
+                ];
+            }
+
+            $messages[] = ["role" => "assistant", "content" => json_encode($toolCall, JSON_UNESCAPED_UNICODE)];
+            $messages[] = ["role" => "user", "content" => "TOOL_RESULT team_members:\n" . json_encode($payload) . "\n\nReturn ONLY clear text with markdown. Present the team members in a nicely formatted list with their name, position (if available), and email."];
+            $second = $this->ollamaChat($messages);
+            return response()->json(['reply' => $this->normalizeFinalReply($second['message']['content'] ?? '')]);
+        }
+
         // =========================================================
         // EXTERNAL / GENERAL KNOWLEDGE RESPONSE
         // =========================================================
         return response()->json(['reply' => $this->normalizeFinalReply($reply)]);
     }
 
-    private function ollamaChat(array $messages): array
+    private function isOffTopicQuery(string $text): bool
     {
-        try {
-            $res = Http::timeout(180)->post('http://localhost:11434/api/chat', [
-                'model' => 'qwen2.5:7b',
-                'stream' => false,
-                'messages' => $messages,
-            ]);
-            if (!$res->ok()) return ['message' => ['content' => 'Ollama error.']];
-            return $res->json();
-        } catch (\Exception $e) {
-            return ['message' => ['content' => "AI Connection Error."]];
+        $t = strtolower($text);
+
+        // Clearly off-topic keywords — anime, pop culture, entertainment, unrelated topics
+        $offTopicPatterns = [
+            // Anime / manga / fictional characters
+            '/\b(gojo|satoru|naruto|goku|luffy|itachi|sasuke|anime|manga|otaku|waifu|jujutsu kaisen|one piece|dragon ball|attack on titan|demon slayer)\b/i',
+            // Movies / TV / celebrities
+            '/\b(harry potter|marvel|disney|netflix|movie|film|celebrity|actor|actress|tiktok|instagram)\b/i',
+            // Games
+            '/\b(minecraft|fortnite|valorant|genshin|pokemon|mobile legends|dota|league of legends|video game)\b/i',
+            // Sports / weather / news
+            '/\b(football|soccer|basketball|f1|formula 1|weather today|news today|election|politics|president|prime minister)\b/i',
+            // Random trivia / cooking / travel
+            '/\b(recipe|cooking|how to cook|travel to|flight to|booking hotel|restaurant recommendation)\b/i',
+            // Math / homework / programming unrelated
+            '/\b(solve this equation|integrate|differentiate|write python|write javascript|my homework)\b/i',
+            // Personal life
+            '/\b(girlfriend|boyfriend|dating|relationship advice|love advice)\b/i',
+        ];
+
+        foreach ($offTopicPatterns as $pattern) {
+            if (preg_match($pattern, $t)) {
+                return true;
+            }
         }
+
+        return false;
     }
+
+    private function ollamaChat(array $messages): array
+{
+    try {
+        $res = Http::timeout(180)
+            ->withHeaders([
+                'Authorization' => 'Bearer ' . env('OPENAI_API_KEY'),
+                'Content-Type' => 'application/json',
+            ])
+            ->post('https://api.openai.com/v1/chat/completions', [
+                'model' => 'gpt-4o-mini',
+                'messages' => $messages,
+                'temperature' => 0.3,
+                'stream' => false,
+            ]);
+
+        if (!$res->ok()) {
+            $errorBody = $res->json();
+            $errorMsg = $errorBody['error']['message'] ?? 'Unknown error';
+            return ['message' => ['content' => 'OpenAI API error: ' . $errorMsg]];
+        }
+
+        $data = $res->json();
+
+        // Convert OpenAI format → Ollama format so the rest of your code works unchanged
+        $content = $data['choices'][0]['message']['content'] ?? 'No response.';
+        return ['message' => ['content' => $content]];
+
+    } catch (\Exception $e) {
+        return ['message' => ['content' => 'AI Connection Error: ' . $e->getMessage()]];
+    }
+}
 
     private function tryParseToolJson(string $text): ?array
     {
