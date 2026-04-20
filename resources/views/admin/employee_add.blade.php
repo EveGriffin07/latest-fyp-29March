@@ -40,7 +40,7 @@
     <form class="filter-bar" method="GET" action="{{ route('admin.employee.list') }}" style="margin-bottom:20px;">
       <input type="hidden" name="tab" value="employees">
       <input type="text" name="q" value="{{ request('q') }}" placeholder="Search name, email or code..." />
-      <select name="department">
+      <select name="_id">
         <option value="">All Departments</option>
         @foreach($departments as $dept)
           <option value="{{ $dept->department_id }}" {{ request('department') == $dept->department_id ? 'selected' : '' }}>

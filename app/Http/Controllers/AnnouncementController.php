@@ -36,7 +36,7 @@ class AnnouncementController extends Controller
             'priority'      => $request->priority,
             // Store Department Name or ID depending on your DB design. 
             // Assuming storing ID is better, but if your table stores strings:
-            'department'    => $request->department, 
+            'department_id'    => $request->department, 
             'publish_at'    => now(),
             'expires_at'    => $request->expires,
             'remarks'       => $request->remarks,

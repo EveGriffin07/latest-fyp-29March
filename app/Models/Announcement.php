@@ -18,7 +18,7 @@ class Announcement extends Model
         'audience_type', // Mapped from 'audience'
         'publish_at',
         'priority',
-        'department',
+        'department_id',
         'expires_at',
         'remarks',
         'posted_by',
